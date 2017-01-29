@@ -5,7 +5,7 @@ Thus
 
 Author: Nathan Sanders
 Date: 1/28/2016
-Version: 0.3
+Version: 0.4
 """
 
 ################################
@@ -19,26 +19,27 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from matplotlib.ticker import MultipleLocator
+import os
 
 
 ################################
 ### Settings
+### Script always uses unites of minutes except when explicitly specified
 ################################
 
 max_count = 2000 # Maximum possible count in a 10 minute span
 false_flag = 1/100. # false positives per minute
 max_video_duration = 1. # Maximum video duration, in minutes
-inactivity_timer = 4/60. # Timeout after last fish motion detected to stop video, in minutes
+inactivity_timer = 20/60. # Timeout after last fish motion detected to stop video, in minutes
 min_fish_crossing_time = 1 / 60. # Minimum time duration that a fish will spend in the frame, in minutes
 discretiziation_time = 0.1 / 60. # Unit for discretizing the simulated time grid, in minutes
+out_dir = 'run_'+str(int(inactivity_timer * 60))+'s_inactivity/'
 
 def crossing_time_generator(N): 
 	# Distribution of crossing times, representing how long each fish stays in the frame
 	out = np.random.lognormal(np.log(6),.5, N) / 60. # convert to minutes
 	out[out < min_fish_crossing_time] = min_fish_crossing_time
 	return out
-
-## Script always uses unites of minutes except when explicitly specified
 
 
 ################################
@@ -57,6 +58,8 @@ historic_data = historic_data.sort('startdate')
 historic_data['timedelta'] = (historic_data['startdate'] - historic_data['startdate'].iloc[0]).astype(int) / (1e9 * 60 * 10) # 10min intervals
 
 historic_data.index = historic_data['timedelta']
+
+os.system('mkdir '+out_dir)
 
 ################################
 ### Define rate model
@@ -138,7 +141,7 @@ for i in range(len(dis_camera_on)):
 		fish_last_in_frame = dis_t[i]
 	
 	## Camera is on if fish was in frame within inactivity_timer
-	if fish_last_in_frame > (dis_t[i] + inactivity_timer):
+	if (fish_last_in_frame + inactivity_timer) > dis_t[i]:
 		dis_camera_on[i] = 1
 
 print "Simulate video start and stop times"
@@ -170,6 +173,36 @@ for i in range(len(video_ends)):
 	sel = np.where((t_rep_comb > video_starts[i]) & (t_rep_comb <= video_ends[i]) & t_rep_comb_key_b)
 	video_counts += [len(sel[0])]
 
+video_starts = np.array(video_starts)
+video_ends = np.array(video_ends)
+video_counts = np.array(video_counts)
+
+
+################################
+### Write out
+################################
+
+print "Write outputs"
+
+start_epoch = historic_data['startdate'].min()
+
+video_df = pd.DataFrame({
+	'Start Time (min)':np.round(video_starts, 2),
+	'End Time (min)':np.round(video_ends, 2),
+	'True Fish Count':np.round(video_counts, 2),
+	'Duration (s)':np.round((video_ends - video_starts) * 60, 1),
+	'Start Timestamp':[start_epoch + np.timedelta64(int(np.floor(d)),'m') + np.timedelta64(int((d-np.floor(d))*60),'s') for d in video_starts],
+	'End Timestamp':[start_epoch + np.timedelta64(int(np.floor(d)),'m') + np.timedelta64(int((d-np.floor(d))*60),'s') for d in video_ends],
+	})
+
+## Print out video metadata
+video_df[['Start Time (min)', 'End Time (min)', 'Duration (s)', 'True Fish Count', 'Start Timestamp', 'End Timestamp']].to_csv(out_dir + 'simulated_fish_videos.csv', index=0)
+
+## Print out individual fish entry and exit times
+start_times_real_fish = t_rep_comb[t_rep_comb_key > 0]
+pd.DataFrame(data = 
+	     {'entrance time': np.round(start_times_real_fish, 2), 'exit time': np.round(start_times_real_fish + t_rep_cross[t_rep_comb_key > 0], 2)}
+		     ).to_csv(out_dir + 'simulated_fish_crossings.csv', index=0)
 
 
 ################################
@@ -177,10 +210,6 @@ for i in range(len(video_ends)):
 ################################
 
 print "Make diagnostic plots"
-
-video_starts = np.array(video_starts)
-video_ends = np.array(video_ends)
-video_counts = np.array(video_counts)
 
 ## Plot of simulations
 plt.figure(figsize=(10,6))
@@ -193,7 +222,7 @@ plt.plot(video_starts, video_counts,
 plt.legend(prop={'size':8})
 plt.xlabel('Time in season (minutes)')
 plt.ylabel('Fish counts')
-plt.savefig('fish_counts_minute_sim.png', dpi=300)
+plt.savefig(out_dir + 'fish_counts_minute_sim.png', dpi=300)
 
 ## Zoomins
 ## Add points and vertical lines
@@ -224,7 +253,14 @@ for i,i_in,i_out,top in [(1, 24508, 24590, 4.3), (2, 60000, 60041, 15), (3, 7000
 	if i==1: plt.legend(prop={'size':8})
 	plt.axis([i_in, i_out, 0, top])
 	plt.gca().xaxis.set_minor_locator(MultipleLocator(1))
-	plt.savefig('fish_counts_minute_sim_zoom'+str(i)+'.png', dpi=600)
+	plt.savefig(out_dir + 'fish_counts_minute_sim_zoom'+str(i)+'.png', dpi=600)
+
+
+## Videos per day
+plt.figure()
+pd.Series(index = video_df['Start Timestamp'], data = np.ones(len(video_df))).groupby(pd.TimeGrouper('1D')).sum().plot(color='k', lw=2, drawstyle='steps-pre')
+plt.ylabel('Videos per day')
+plt.savefig(out_dir + 'video_counts_perday.png', dpi=300)
 
 
 ## Fish counts histogram
@@ -234,7 +270,7 @@ plt.ylabel('Number of videos')
 plt.xlabel('# of fish')
 plt.gca().xaxis.set_minor_locator(MultipleLocator(1))
 plt.gca().set_xlim(0, np.max(video_counts)+3)
-plt.savefig('fish_counts_histogram.png', dpi=300)
+plt.savefig(out_dir + 'fish_counts_histogram.png', dpi=300)
 
 
 ## Crossing times histogram
@@ -243,7 +279,7 @@ plt.hist(t_rep_cross * 60., range=[0,40], bins=80, color='.5', edgecolor='none')
 plt.ylabel('Number of fish')
 plt.xlabel('Crossing duration (s)')
 plt.gca().xaxis.set_minor_locator(MultipleLocator(1)) 
-plt.savefig('fish_crossing_times_histogram.png', dpi=300)
+plt.savefig(out_dir + 'fish_crossing_times_histogram.png', dpi=300)
 
 ## Video duration histogram
 plt.figure()
@@ -251,35 +287,7 @@ plt.hist((video_ends - video_starts) * 60, np.arange(0, np.ceil(max_video_durati
 plt.ylabel('Number of videos')
 plt.xlabel('Video duration (s)')
 plt.gca().xaxis.set_minor_locator(MultipleLocator(1)) 
-plt.savefig('video_duration_histogram.png', dpi=300)
-
-
-
-################################
-### Write out
-################################
-
-print "Write outputs"
-
-start_epoch = historic_data['startdate'].min()
-
-video_df = pd.DataFrame({
-	'Start Time (min)':np.round(video_starts, 2),
-	'End Time (min)':np.round(video_ends, 2),
-	'True Fish Count':np.round(video_counts, 2),
-	'Duration (s)':np.round((video_ends - video_starts) * 60, 1),
-	'Start Timestamp':[start_epoch + np.timedelta64(int(np.floor(d)),'m') + np.timedelta64(int((d-np.floor(d))*60),'s') for d in video_starts],
-	'End Timestamp':[start_epoch + np.timedelta64(int(np.floor(d)),'m') + np.timedelta64(int((d-np.floor(d))*60),'s') for d in video_ends],
-	})
-
-## Print out video metadata
-video_df[['Start Time (min)', 'End Time (min)', 'Duration (s)', 'True Fish Count', 'Start Timestamp', 'End Timestamp']].to_csv('simulated_fish_videos.csv', index=0)
-
-## Print out individual fish entry and exit times
-start_times_real_fish = t_rep_comb[t_rep_comb_key > 0]
-pd.DataFrame(data = 
-	     {'entrance time': np.round(start_times_real_fish, 2), 'exit time': np.round(start_times_real_fish + t_rep_cross[t_rep_comb_key > 0], 2)}
-		     ).to_csv('simulated_fish_crossings.csv', index=0)
+plt.savefig(out_dir + 'video_duration_histogram.png', dpi=300)
 
 
 
@@ -307,6 +315,9 @@ class TestVideos(unittest.TestCase):
 
 	def test_correct_count(self):
 		self.assertEqual(video_df['True Fish Count'].sum().astype(int), t_rep_comb_key.sum().astype(int))
+	
+	def test_inactivity_gap(self):
+		self.assertTrue(np.sum(dis_camera_on) > np.sum(dis_fish_in_frame))
 
 
 if __name__ == '__main__':
