@@ -16,6 +16,7 @@ Generate synthetic data for a fish counting video server
 * fish_duration_histogram.png - view of the distribution of video durations in seconds on a log scale.  Expect to see a power law distribution, with an additional spike at the maximum duration
 * fish_crossing_times_histogram.png - view of the distribution of how long each fish stays in the frame.  This is pre-specified as a setting.
 * video_counts_perday.png - The total number of videos recorded each day of the season
+* video_counts_perday_falsepositive.png - The fraction of videos recorded each day of the season that actually have fish (are not false positives)
 
 ## Notes
 

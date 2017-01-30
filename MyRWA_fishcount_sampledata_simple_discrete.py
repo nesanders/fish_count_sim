@@ -263,6 +263,14 @@ plt.ylabel('Videos per day')
 plt.savefig(out_dir + 'video_counts_perday.png', dpi=300)
 
 
+
+## False positive videos per day
+plt.figure()
+pd.Series(index = video_df['Start Timestamp'], data = (video_df['True Fish Count'] > 0).values.astype(int)).groupby(pd.TimeGrouper('1D')).mean().plot(color='k', lw=2, drawstyle='steps-pre')
+plt.ylabel('Fraction of videos that are not false positives (empty with no fish)')
+plt.savefig(out_dir + 'video_counts_perday_falsepositive.png', dpi=300)
+
+
 ## Fish counts histogram
 plt.figure()
 plt.hist(video_counts, np.arange(0, np.max(video_counts)+3) - 0.05, color='.5', edgecolor='none', log=1)
